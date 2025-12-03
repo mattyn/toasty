@@ -1,4 +1,6 @@
-use super::{ErrorSet, Field, Index, IndexField, IndexScope, ModelAttr, Name, PrimaryKey};
+use super::{
+    ErrorSet, Field, Index, IndexField, IndexScope, ItemCollection, ModelAttr, Name, PrimaryKey,
+};
 
 #[derive(Debug)]
 pub(crate) struct Model {
@@ -37,6 +39,9 @@ pub(crate) struct Model {
 
     /// Optional table to map the model to
     pub(crate) table: Option<syn::LitStr>,
+
+    /// Item collection this model belongs to
+    pub(crate) item_collection: Option<ItemCollection>,
 }
 
 impl Model {
@@ -169,6 +174,16 @@ impl Model {
             }
         }
 
+        // check for an item collection attribute
+        let item_collection = match ast
+            .attrs
+            .iter()
+            .find(|attr| attr.meta.path().is_ident("item_collection"))
+        {
+            None => None,
+            Some(attr) => Some(ItemCollection::from_ast(attr)?),
+        };
+
         Ok(Self {
             vis: ast.vis.clone(),
             name: Name::from_ident(&ast.ident),
@@ -182,6 +197,7 @@ impl Model {
             update_struct_ident: struct_ident("Update", ast),
             update_query_struct_ident: struct_ident("UpdateQuery", ast),
             table: model_attr.table,
+            item_collection,
         })
     }
 

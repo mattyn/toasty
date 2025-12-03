@@ -1,6 +1,8 @@
+use crate::{BuildKeyExpression, sort_key_columns};
+
 use super::{ddb_expression, item_to_record, operation, stmt, DynamoDb, ExprAttrs, Result, Schema};
-use std::sync::Arc;
-use toasty_core::{driver::Response, stmt::ExprContext};
+use std::{collections::HashMap, sync::Arc};
+use toasty_core::{driver::Response, schema::db::{Column, ColumnId, IndexScope}, stmt::ExprContext};
 
 impl DynamoDb {
     pub(crate) async fn exec_query_pk(
@@ -12,7 +14,20 @@ impl DynamoDb {
         let cx = ExprContext::new_with_target(&**schema, table);
 
         let mut expr_attrs = ExprAttrs::default();
-        let key_expression = ddb_expression(&cx, &mut expr_attrs, true, &op.pk_filter);
+        let sk_cols: Vec<ColumnId> = sort_key_columns(table);
+        let pk_cols: Vec<&Column> = table.indices[table.primary_key.index.index].columns.iter().filter(|c| matches!(c.scope, IndexScope::Partition)).map(|c| table.column(c.column)).collect();
+        assert!(pk_cols.len() == 1);
+        let concat_sks = sk_cols.len() > 1;
+        let key_expression = BuildKeyExpression {
+            cx: &cx,
+            attrs: &mut expr_attrs,
+            expr: &op.pk_filter,
+            concat_sk: concat_sks,
+            pk_column: pk_cols.first().as_ref().unwrap(),
+            sk_columns: &sk_cols,
+            pk_component: None,
+            sk_components: HashMap::new(),
+        }.build();
 
         let filter_expression = op
             .filter
@@ -37,6 +52,7 @@ impl DynamoDb {
                 item_to_record(
                     &item,
                     op.select.iter().map(|column_id| schema.column(*column_id)),
+                    &sk_cols
                 )
             }),
         )))

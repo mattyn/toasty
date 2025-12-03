@@ -1,8 +1,10 @@
+use crate::sort_key_columns;
+
 use super::{
     ddb_key, item_to_record, operation, stmt, DynamoDb, KeysAndAttributes, Result, Schema,
 };
 use std::{collections::HashMap, sync::Arc};
-use toasty_core::driver::Response;
+use toasty_core::{driver::Response};
 
 impl DynamoDb {
     pub(crate) async fn exec_get_by_key(
@@ -11,6 +13,7 @@ impl DynamoDb {
         op: operation::GetByKey,
     ) -> Result<Response> {
         let table = schema.table(op.table);
+        let sk_cols = sort_key_columns(table);
 
         if op.keys.len() == 1 {
             // TODO: set attributes to get
@@ -23,7 +26,7 @@ impl DynamoDb {
                 .await?;
 
             if let Some(item) = res.item() {
-                let row = item_to_record(item, op.select.iter().map(|id| schema.column(*id)))?;
+                let row = item_to_record(item, op.select.iter().map(|id| schema.column(*id)), &sk_cols)?;
                 Ok(Response::value_stream(stmt::ValueStream::from_value(row)))
             } else {
                 Ok(Response::empty_value_stream())
@@ -70,6 +73,7 @@ impl DynamoDb {
                     item_to_record(
                         &item,
                         op.select.iter().map(|column_id| schema.column(*column_id)),
+                        &sk_cols
                     )
                 }),
             )))

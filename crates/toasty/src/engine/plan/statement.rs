@@ -1,5 +1,5 @@
 use indexmap::IndexSet;
-use toasty_core::stmt::{self, visit_mut, Condition};
+use toasty_core::stmt::{self, Condition, ExprReference, visit_mut};
 
 use crate::engine::{
     eval, hir,
@@ -659,6 +659,7 @@ impl<'a, 'b> PlanStatement<'a, 'b> {
         // Without SQL capability, we have to plan the execution of the
         // statement based on available indices.
         let mut index_plan = self.planner.engine.plan_index_path(&linked.stmt);
+
         let pk_keys = self.try_build_pk_keys(&linked, &index_plan, ref_source);
 
         let post_filter =
@@ -716,14 +717,37 @@ impl<'a, 'b> PlanStatement<'a, 'b> {
                 todo!()
             };
 
-            self.insert_mir_with_deps(mir::QueryPk {
-                input,
-                table: index_plan.table_id(),
-                columns: selection.columns.clone(),
-                pk_filter: index_plan.index_filter.take(),
-                row_filter: index_plan.result_filter.take(),
-                ty: ty.clone(),
-            })
+            match &linked.stmt {
+                stmt::Statement::Query(_) => {
+                    // becuase the point is to query, we can just use the results directly
+                    self.insert_mir_with_deps(mir::QueryPk {
+                        input,
+                        table: index_plan.table_id(),
+                        columns: selection.columns.clone(),
+                        pk_filter: index_plan.index_filter.take(),
+                        row_filter: index_plan.result_filter.take(),
+                        ty: ty.clone(),
+                    })
+                },
+                _ => {
+                    // need to use the results for a non-query op
+                    let index_key_ty = self.index_key_ty(index_plan);
+                    let mut columns: IndexSet<ExprReference> = IndexSet::new();
+                    for index_col in &index_plan.index.columns {
+                        columns.insert(ExprReference::Column(stmt::ExprColumn { nesting: 0, table: index_plan.table_id().0, column: index_col.column.clone().index }));
+                    }
+                    let get_by_key_input = self.insert_mir_with_deps(mir::QueryPk {
+                        input,
+                        table: index_plan.table_id(),
+                        columns: columns,
+                        pk_filter: index_plan.index_filter.take(),
+                        row_filter: index_plan.result_filter.take(),
+                        ty: index_key_ty,
+                    });
+                    self.build_key_operation(&linked.stmt, index_plan, get_by_key_input, selection, ty)
+                }
+            }
+            
         }
     }
 

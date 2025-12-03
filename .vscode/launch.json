@@ -1,0 +1,541 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug unit tests in library 'toasty'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=toasty"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'generate_unique_id'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=generate_unique_id",
+                    "--package=toasty"
+                ]
+            }
+        },
+        {
+            "name": "Debug unit tests in library 'toasty_core'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=toasty-core"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'stmt_infer'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=stmt_infer",
+                    "--package=toasty-core"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'stmt_projection'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=stmt_projection",
+                    "--package=toasty-core"
+                ]
+            }
+        },
+        {
+            "name": "Debug unit tests in library 'std_util'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=std-util"
+                ]
+            }
+        },
+        {
+            "name": "Debug unit tests in library 'toasty_driver_dynamodb'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=toasty-driver-dynamodb"
+                ]
+            }
+        },
+        {
+            "name": "Debug unit tests in library 'toasty_driver_mysql'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=toasty-driver-mysql"
+                ]
+            }
+        },
+        {
+            "name": "Debug unit tests in library 'toasty_sql'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=toasty-sql"
+                ]
+            }
+        },
+        {
+            "name": "Debug unit tests in library 'toasty_driver_postgresql'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=toasty-driver-postgresql"
+                ]
+            }
+        },
+        {
+            "name": "Debug unit tests in library 'toasty_driver_sqlite'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=toasty-driver-sqlite"
+                ]
+            }
+        },
+        {
+            "name": "Debug unit tests in library 'toasty_codegen'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=toasty-codegen"
+                ]
+            }
+        },
+        {
+            "name": "Debug executable 'example-composite-key'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "run",
+                    "--bin=example-composite-key",
+                    "--package=example-composite-key"
+                ]
+            },
+            "args": []
+        },
+        {
+            "name": "Debug unit tests in executable 'example-composite-key'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--bin=example-composite-key",
+                    "--package=example-composite-key"
+                ]
+            }
+        },
+        {
+            "name": "Debug executable 'example-hello-toasty'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "run",
+                    "--bin=example-hello-toasty",
+                    "--package=example-hello-toasty"
+                ]
+            },
+            "args": []
+        },
+        {
+            "name": "Debug unit tests in executable 'example-hello-toasty'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--bin=example-hello-toasty",
+                    "--package=example-hello-toasty"
+                ]
+            }
+        },
+        {
+            "name": "Debug executable 'example-user-has-one-profile'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "run",
+                    "--bin=example-user-has-one-profile",
+                    "--package=example-user-has-one-profile"
+                ]
+            },
+            "args": []
+        },
+        {
+            "name": "Debug unit tests in executable 'example-user-has-one-profile'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--bin=example-user-has-one-profile",
+                    "--package=example-user-has-one-profile"
+                ]
+            }
+        },
+        {
+            "name": "Debug unit tests in library 'tests'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'belongs_to_configured'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=belongs_to_configured",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'belongs_to_one_way'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=belongs_to_one_way",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'belongs_to_self_referential'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=belongs_to_self_referential",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'field_column_name'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=field_column_name",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'field_column_type'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=field_column_type",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'has_many_batch_create'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=has_many_batch_create",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'has_many_crud_basic'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=has_many_crud_basic",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'has_many_crud_multi_relations'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=has_many_crud_multi_relations",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'has_many_item_collection'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=has_many_item_collection",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'has_many_link_unlink'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=has_many_link_unlink",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'has_many_n_1'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=has_many_n_1",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'has_many_scoped_query'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=has_many_scoped_query",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'has_one_crud_basic'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=has_one_crud_basic",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'into_expr'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=into_expr",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'jiff'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=jiff",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'one_model_batch_create'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=one_model_batch_create",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'one_model_composite_key'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=one_model_composite_key",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'one_model_crud'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=one_model_crud",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'one_model_crud_basic_driver_ops'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=one_model_crud_basic_driver_ops",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'one_model_query'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=one_model_query",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'one_model_sort_limit'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=one_model_sort_limit",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'preload'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=preload",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'sync_send'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=sync_send",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'tys'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=tys",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug integration test 'ui'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--test=ui",
+                    "--package=tests"
+                ]
+            }
+        },
+        {
+            "name": "Debug benchmark 'association'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--bench=association",
+                    "--package=benches"
+                ]
+            }
+        }
+    ]
+}

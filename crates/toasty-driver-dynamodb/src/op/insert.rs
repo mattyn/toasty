@@ -1,8 +1,11 @@
+use crate::sort_key_columns;
+
 use super::{
     ddb_val, stmt, DynamoDb, Put, PutRequest, Result, Schema, TransactWriteItem, WriteRequest,
 };
-use std::collections::HashMap;
-use toasty_core::driver::Response;
+use std::collections::{HashMap, HashSet};
+use aws_sdk_dynamodb::types::AttributeValue;
+use toasty_core::{driver::Response, schema::db::ColumnId, stmt::Value};
 
 impl DynamoDb {
     pub(crate) async fn exec_insert(
@@ -36,17 +39,40 @@ impl DynamoDb {
 
         let source = insert.source.body.into_values();
 
+        let sk_cols: Vec<ColumnId> = sort_key_columns(table);
+        let concat_sks = sk_cols.len() > 1;
+        let sk_col_ids: HashSet<ColumnId> = sk_cols.iter().map(|c| c.clone()).collect();
+
         for row in source.rows {
             let mut items = HashMap::new();
+            let mut sk_vals: HashMap<ColumnId, Value> = HashMap::new();
 
             for (i, column_id) in insert_table.columns.iter().enumerate() {
                 let column = schema.column(*column_id);
                 let entry = row.entry(i);
                 let value = entry.as_value();
 
-                if !value.is_null() {
-                    items.insert(column.name.clone(), ddb_val(value));
+                if concat_sks && sk_col_ids.contains(column_id) {
+                    // collect the value, we will add this later
+                    sk_vals.insert(column_id.clone(), value.clone());
+                    continue;
                 }
+
+                if !value.is_null() {
+                    items.insert(column.name.clone(), ddb_val(&value));
+                }
+            }
+
+            if concat_sks {
+                let mut sk_val = sk_cols.iter()
+                    .map(|c| sk_vals.get(&c).expect("SK value not provided for insert"))
+                    .map(|v| v.as_str().map(|s| String::from(s)))
+                    .filter(|v| v.is_some())
+                    .map(|o| o.unwrap())
+                    .collect::<Vec<String>>()
+                    .join("#");
+                sk_val.push('#');
+                items.insert("__sk".into(), AttributeValue::S(sk_val));
             }
             insert_items.push(items);
         }

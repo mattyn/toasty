@@ -2,8 +2,8 @@ use super::BuildSchema;
 use crate::{
     driver,
     schema::{
-        app::{self, FieldId, Model},
-        db::{self, ColumnId, IndexId, Table, TableId},
+        app::{self, FieldId, FieldTy, Model, ModelId},
+        db::{self, ColumnId, IndexColumn, IndexId, Table, TableId},
         mapping::{self, Mapping, TableToModel},
         Name,
     },
@@ -46,12 +46,87 @@ impl BuildSchema<'_> {
             }
 
             *self.table_lookup.get(&table_name).unwrap()
+        } else if let Some(_) = &model.item_collection {
+            // return placeholder, so this can be fixed up in a second pass
+            TableId::placeholder()
         } else {
             let name = self.table_name_from_model(&model.name);
             let id = self.register_table(&name);
 
             self.tables.push(Table::new(id, name));
             id
+        }
+    }
+
+    pub(super) fn populate_item_collection_mapping(
+        &mut self,
+        app: &app::Schema,
+        model: &Model,
+    ) -> crate::Result<()> {
+        if model.item_collection.is_some() {
+            let (table, path) = self.find_item_collection_path(app, model);
+
+            // ensure all paths up to the root are populated
+            for (idx, mid) in path.iter().enumerate() {
+                let source_model = self.mapping.model_mut(mid);
+                source_model.table = table;
+
+                if !source_model.item_collection.path.is_empty() {
+                    source_model
+                        .item_collection
+                        .path
+                        .extend_from_slice(&path[..(idx + 1)]);
+                    source_model.item_collection.path.push(model.id.clone());
+                }
+            }
+
+            // scan relations to map PK fields from parents to FK fields in this model
+            let source_model = self.mapping.model_mut(model.id);
+            for field in &model.fields {
+                match &field.ty {
+                    FieldTy::BelongsTo(rel) => {
+                        for fk in &rel.foreign_key.fields {
+                            if model.field(fk.source).primary_key {
+                                source_model
+                                    .item_collection
+                                    .field_mapping
+                                    .insert(fk.source.clone(), fk.target.clone());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            Ok(())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn find_item_collection_path(
+        &self,
+        app: &app::Schema,
+        model: &Model,
+    ) -> (TableId, Vec<ModelId>) {
+        let mut path: Vec<ModelId> = Vec::new();
+        let table = self.find_item_collection_path_helper(app, model, &mut path);
+        path.reverse();
+        (table, path)
+    }
+
+    fn find_item_collection_path_helper(
+        &self,
+        app: &app::Schema,
+        model: &Model,
+        path: &mut Vec<ModelId>,
+    ) -> TableId {
+        if let Some(item_collection) = &model.item_collection {
+            path.push(model.id.clone());
+            self.find_item_collection_path_helper(app, app.model(item_collection), path)
+        } else {
+            path.push(model.id.clone());
+            self.mapping.model(model.id).table
         }
     }
 
@@ -62,10 +137,12 @@ impl BuildSchema<'_> {
                 .filter(|model| self.mapping.model(model.id).table == table.id)
                 .collect::<Vec<_>>();
 
-            assert!(
-                models.len() == 1,
-                "TODO: handle mapping many models to one table"
-            );
+            let (roots, children): (Vec<&Model>, Vec<&Model>) =
+                models.iter().partition(|m| m.item_collection.is_none());
+
+            assert!(roots.len() == 1, "item collection may only have one root");
+
+            let root = roots[0];
 
             BuildTableFromModels {
                 db,
@@ -73,7 +150,7 @@ impl BuildSchema<'_> {
                 mapping: &mut self.mapping,
                 prefix_table_names: models.len() > 1,
             }
-            .build(models[0]);
+            .build(root, children);
         }
     }
 
@@ -99,14 +176,27 @@ impl BuildSchema<'_> {
 }
 
 impl BuildTableFromModels<'_> {
-    fn build(&mut self, model: &Model) {
+    fn build(&mut self, model: &Model, item_collection_children: Vec<&Model>) {
         // Populate the rest of the columns
-        self.map_model_fields(model);
+        self.map_model_fields(model, !item_collection_children.is_empty());
+
+        let model_column = self.map_model_column(model, &item_collection_children);
+
+        for child in &item_collection_children {
+            self.map_item_collection_child(child, model);
+        }
 
         self.update_index_names();
+
+        if let Some(column_id) = model_column {
+            self.add_model_column_to_mapping(model, &column_id);
+            for child in item_collection_children {
+                self.add_model_column_to_mapping(child, &column_id);
+            }
+        }
     }
 
-    fn map_model_fields(&mut self, model: &Model) {
+    fn map_model_fields(&mut self, model: &Model, has_children: bool) {
         let prefix = if self.prefix_table_names {
             Some(model.name.snake_case())
         } else {
@@ -122,7 +212,12 @@ impl BuildTableFromModels<'_> {
                         simple,
                         &field.name,
                         prefix.as_deref(),
-                        field.nullable,
+                        if has_children && !field.primary_key {
+                            // non-PK fields of the root model are always nullable since they don't apply to child rows
+                            true
+                        } else {
+                            field.nullable
+                        },
                     );
                 }
                 // HasMany/HasOne relationships do not have columns... for now?
@@ -158,29 +253,33 @@ impl BuildTableFromModels<'_> {
                 primary_key: model_index.primary_key,
             };
 
-            for index_field in &model_index.fields {
-                let column = self.mapping.model(model.id).fields[index_field.field.index]
-                    .as_ref()
-                    .unwrap()
-                    .column;
-
-                match &model.fields[index_field.field.index].ty {
-                    app::FieldTy::Primitive(_) => index.columns.push(db::IndexColumn {
-                        column,
-                        op: index_field.op,
-                        scope: index_field.scope,
-                    }),
-                    app::FieldTy::BelongsTo(_) => todo!(),
-                    app::FieldTy::HasMany(_) => todo!(),
-                    app::FieldTy::HasOne(_) => todo!(),
-                }
-
-                if model_index.primary_key {
-                    self.table.primary_key.columns.push(column);
-                }
-            }
+            self.populate_model_index(model, model_index, &mut index);
 
             self.table.indices.push(index);
+        }
+    }
+
+    fn populate_model_index(&mut self, model: &Model, model_index: &app::Index, index: &mut db::Index) {
+        for index_field in &model_index.fields {
+            let column = self.mapping.model(model.id).fields[index_field.field.index]
+            .as_ref()
+            .unwrap()
+            .column;
+            
+            match &model.fields[index_field.field.index].ty {
+                app::FieldTy::Primitive(_) => index.columns.push(db::IndexColumn {
+                    column,
+                    op: index_field.op,
+                    scope: index_field.scope,
+                }),
+                app::FieldTy::BelongsTo(_) => todo!(),
+                app::FieldTy::HasMany(_) => todo!(),
+                app::FieldTy::HasOne(_) => todo!(),
+            }
+            
+            if model_index.primary_key {
+                self.table.primary_key.columns.push(column);
+            }
         }
     }
 
@@ -242,6 +341,184 @@ impl BuildTableFromModels<'_> {
             }
         }
     }
+
+    fn map_model_column(&mut self, model: &Model, item_collection_children: &Vec<&Model>) -> Option<ColumnId> {
+        if item_collection_children.is_empty() {
+            return None;
+        }
+
+        let storage_name = String::from("__model");
+
+        let storage_ty = db::Type::VarChar(std::cmp::max(
+            model.name.camel_case().len(),
+            item_collection_children
+                .iter()
+                .map(|m| m.name.camel_case().len())
+                .max()
+                .unwrap_or(0),
+        ) as u64);
+
+        let column = db::Column {
+            id: ColumnId {
+                table: self.table.id,
+                index: self.table.columns.len(),
+            },
+            name: storage_name,
+            ty: storage_ty.bridge_type(&stmt::Type::String),
+            storage_ty,
+            nullable: false,
+            primary_key: true,
+        };
+        let column_id = column.id.clone();
+
+        self.table.columns.push(column);
+        self.table.primary_key.columns.push(column_id);
+
+        // add the column to the PK index
+        let mut pk_indices: Vec<&mut db::Index> = self
+            .table
+            .indices
+            .iter_mut()
+            .filter(|i| i.primary_key)
+            .collect();
+        if pk_indices.len() != 1 {
+            todo!("multiple primary key indices for table {}", self.table.name);
+        }
+        let pk_index: &mut &mut db::Index = pk_indices
+            .iter_mut()
+            .next()
+            .expect("should be only one index");
+        pk_index.columns.push(IndexColumn {
+            column: column_id,
+            op: db::IndexOp::Eq,
+            scope: db::IndexScope::Local,
+        });
+
+        Some(column_id)
+    }
+
+    fn map_item_collection_child(&mut self, model: &Model, root: &Model) {
+        let prefix = Some(model.name.snake_case());
+
+        // First, populate columns
+        for field in &model.fields {
+            if let Some(parent) = self.find_item_collection_parent_column(field, model) {
+                // this field maps to a parent model's field, so use the same column for both
+                self.mapping.model_mut(model.id).fields[field.id.index]
+                    .as_mut()
+                    .unwrap()
+                    .column = parent;
+                continue;
+            }
+            match &field.ty {
+                app::FieldTy::Primitive(simple) => {
+                    self.create_column_for_primitive(
+                        field.id,
+                        simple,
+                        &field.name,
+                        prefix.as_deref(),
+                        true, // child fields are always nullable
+                    );
+                }
+                // HasMany/HasOne relationships do not have columns... for now?
+                app::FieldTy::BelongsTo(_) | app::FieldTy::HasMany(_) | app::FieldTy::HasOne(_) => {
+                }
+            }
+        }
+
+        BuildMapping {
+            table: self.table,
+            mapping: self.mapping.model_mut(model),
+            lowering_columns: vec![],
+            model_to_table: vec![],
+            model_pk_to_table: vec![],
+            table_to_model: vec![],
+        }
+        .build_mapping(model);
+
+        self.populate_child_model_indices(model, root);
+    }
+
+    fn find_item_collection_parent_column(
+        &self,
+        field: &app::Field,
+        model: &Model,
+    ) -> Option<ColumnId> {
+        let item_collection = &self.mapping.model(model.id).item_collection;
+        let parent_field = item_collection.field_mapping.get(&field.id);
+        parent_field.map(|fid| {
+            let parent_mapping = self.mapping.model(fid.model);
+            parent_mapping.fields[fid.index]
+                .as_ref()
+                .unwrap()
+                .column
+                .clone()
+        })
+    }
+
+    fn populate_child_model_indices(&mut self, model: &Model, root: &Model) {
+        for model_index in &model.indices {
+            let mut temp = self.table.indices.iter_mut().find(|i| i.primary_key);
+            let index = temp.as_deref_mut().unwrap();
+            if model_index.primary_key {
+                for index_field in &model_index.fields {
+                    if self.mapping.model(model.id).item_collection.field_mapping.contains_key(&index_field.field) {
+                        // this should already be in the index since it comes from the parent model
+                        continue;
+                    }
+                    let column = self.mapping.model(model.id).fields[index_field.field.index]
+                    .as_ref()
+                    .unwrap()
+                    .column;
+                    
+                    match &model.fields[index_field.field.index].ty {
+                        app::FieldTy::Primitive(_) => index.columns.push(db::IndexColumn {
+                            column,
+                            op: index_field.op,
+                            // all the parent columns go in the partition key, child columns go in the local key / sort key
+                            scope: db::IndexScope::Local,
+                        }),
+                        app::FieldTy::BelongsTo(_) => todo!(),
+                        app::FieldTy::HasMany(_) => todo!(),
+                        app::FieldTy::HasOne(_) => todo!(),
+                    }
+                    
+                    if model_index.primary_key {
+                        self.table.primary_key.columns.push(column.clone());
+                        let root_mapping = self.mapping.model_mut(root);
+                        root_mapping.columns.push(column);
+                        // root_mapping.model_pk_to_table.push(stmt::Expr::null());
+                        root_mapping.model_to_table.push(stmt::Expr::null());
+                        // TODO: also add these columns to the mappings for all models in the item collection
+                    }
+                }
+                continue;
+            }
+            let mut index = db::Index {
+                id: IndexId {
+                    table: self.table.id,
+                    index: self.table.indices.len(),
+                },
+                name: String::new(),
+                on: self.table.id,
+                columns: vec![],
+                unique: model_index.unique,
+                primary_key: model_index.primary_key,
+            };
+
+            self.populate_model_index(model, model_index, &mut index);
+
+            self.table.indices.push(index);
+        }
+    }
+
+    fn add_model_column_to_mapping(&mut self, model: &Model, column: &ColumnId) {
+        let mapping = self.mapping.model_mut(model.id);
+        mapping.item_collection.model_column = Some(column.clone());
+        mapping.columns.push(column.clone());
+        mapping.model_to_table.push(stmt::Value::from(model.name.camel_case()).into());
+    }
+
 }
 
 impl BuildMapping<'_> {
@@ -265,51 +542,51 @@ impl BuildMapping<'_> {
         }
 
         // Build the PK lowering
-        for pk_field in &self.table.primary_key.columns {
-            // Find the column's position in the mapping
-            let index = self
-                .lowering_columns
-                .iter()
-                .position(|column_id| column_id == pk_field)
-                .unwrap();
+        // for pk_field in &self.table.primary_key.columns {
+        //     // Find the column's position in the mapping
+        //     let index = self
+        //         .lowering_columns
+        //         .iter()
+        //         .position(|column_id| column_id == pk_field)
+        //         .unwrap();
 
-            assert!(
-                index < self.model_to_table.len(),
-                "column={:#?}; index={}; lowering_columns={:#?}; mapping={:#?}",
-                pk_field,
-                index,
-                self.lowering_columns,
-                self.model_to_table
-            );
+        //     assert!(
+        //         index < self.model_to_table.len(),
+        //         "column={:#?}; index={}; lowering_columns={:#?}; mapping={:#?}",
+        //         pk_field,
+        //         index,
+        //         self.lowering_columns,
+        //         self.model_to_table
+        //     );
 
-            let expr = self.model_to_table[index].map_projections(|projection| {
-                let [step, ..] = &projection[..] else {
-                    todo!(
-                        "projection={:#?}; mapping={:#?}",
-                        projection,
-                        self.model_to_table
-                    )
-                };
+        //     let expr = self.model_to_table[index].map_projections(|projection| {
+        //         let [step, ..] = &projection[..] else {
+        //             todo!(
+        //                 "projection={:#?}; mapping={:#?}",
+        //                 projection,
+        //                 self.model_to_table
+        //             )
+        //         };
 
-                for (i, field_id) in model.primary_key.fields.iter().enumerate() {
-                    if field_id.index == *step {
-                        let mut p = projection.clone();
-                        p[0] = i;
+        //         for (i, field_id) in model.primary_key.fields.iter().enumerate() {
+        //             if field_id.index == *step {
+        //                 let mut p = projection.clone();
+        //                 p[0] = i;
 
-                        return p;
-                    }
-                }
+        //                 return p;
+        //             }
+        //         }
 
-                todo!(
-                    "boom; projection={:?}; mapping={:#?}; PK={:#?}",
-                    projection,
-                    self.model_to_table,
-                    model.primary_key
-                );
-            });
+        //         todo!(
+        //             "boom; projection={:?}; mapping={:#?}; PK={:#?}",
+        //             projection,
+        //             self.model_to_table,
+        //             model.primary_key
+        //         );
+        //     });
 
-            self.model_pk_to_table.push(expr);
-        }
+        //     self.model_pk_to_table.push(expr);
+        // }
 
         self.mapping.columns = self.lowering_columns;
         self.mapping.model_to_table = stmt::ExprRecord::from_vec(self.model_to_table);

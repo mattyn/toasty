@@ -13,6 +13,7 @@ impl Expand<'_> {
         let primary_key = self.expand_primary_key();
         let indices = self.expand_model_indices();
         let table_name = self.expand_table_name();
+        let item_collection = self.expand_item_collection(toasty);
 
         quote! {
             fn schema() -> #toasty::schema::app::Model {
@@ -35,6 +36,7 @@ impl Expand<'_> {
                     primary_key: #primary_key,
                     indices: #indices,
                     table_name: #table_name,
+                    item_collection: #item_collection,
                 }
             }
         }
@@ -248,6 +250,15 @@ impl Expand<'_> {
         if let Some(table_name) = &self.model.table {
             let table_name = table_name.value();
             quote! { Some(#table_name.to_string()) }
+        } else {
+            quote! { None }
+        }
+    }
+
+    fn expand_item_collection(&self, toasty: &TokenStream) -> TokenStream {
+        if let Some(item_collection) = &self.model.item_collection {
+            let ty = item_collection.ty.clone();
+            quote! { Some(<#ty as #toasty::Model>::id()) }
         } else {
             quote! { None }
         }

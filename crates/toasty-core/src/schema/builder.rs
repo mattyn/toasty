@@ -1,7 +1,7 @@
 mod table;
 
 use super::{app, db, mapping, Result};
-use crate::schema::mapping::TableToModel;
+use crate::schema::mapping::{ItemCollection, TableToModel};
 use crate::schema::{ColumnId, Mapping, Schema, Table, TableId};
 use crate::{driver, stmt};
 use indexmap::IndexMap;
@@ -91,8 +91,18 @@ impl Builder {
                     model_to_table: stmt::ExprRecord::default(),
                     model_pk_to_table: stmt::Expr::null(),
                     table_to_model: TableToModel::default(),
+                    item_collection: ItemCollection {
+                        path: Vec::new(),
+                        field_mapping: IndexMap::new(),
+                        model_column: None,
+                    },
                 },
             );
+        }
+
+        // fix up the mappings for item collections
+        for model in app.models() {
+            builder.populate_item_collection_mapping(&app, model)?;
         }
 
         builder.build_tables_from_models(&app, db);

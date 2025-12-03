@@ -4,6 +4,9 @@ pub use field::Field;
 mod model;
 pub use model::{Model, TableToModel};
 
+mod item_collection;
+pub use item_collection::ItemCollection;
+
 use super::app::ModelId;
 use indexmap::IndexMap;
 

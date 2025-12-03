@@ -1,12 +1,12 @@
 mod op;
 
 use toasty_core::{
-    driver::{operation::Operation, Capability, Driver, Response},
+    driver::{Capability, Driver, Response, operation::Operation},
     schema::{
         app,
-        db::{Column, ColumnId, Schema, Table},
+        db::{Column, ColumnId, IndexScope, Schema, Table},
     },
-    stmt::{self, ExprContext},
+    stmt::{self, Expr, ExprContext, Visit},
 };
 
 use anyhow::Result;
@@ -143,13 +143,39 @@ fn ddb_ty(ty: &stmt::Type) -> ScalarAttributeType {
 fn ddb_key(table: &Table, key: &stmt::Value) -> HashMap<String, AttributeValue> {
     let mut ret = HashMap::new();
 
-    for (index, column) in table.primary_key_columns().enumerate() {
+    let mut sk_values: Vec<(&String, &stmt::Value)> = Vec::new();
+    for (index, index_column) in table.indices[table.primary_key.index.index].columns.iter().enumerate() {
+        let column = table.column(index_column.column);
         let value = match key {
             stmt::Value::Record(record) => &record[index],
             value => value,
         };
 
-        ret.insert(column.name.clone(), ddb_val(value));
+        match index_column.scope {
+            IndexScope::Local => {
+                sk_values.push((&column.name, value));
+            },
+            IndexScope::Partition => {
+                ret.insert(column.name.clone(), ddb_val(value));
+            }
+        }
+    }
+
+    if sk_values.len() > 1 {
+        // we need to concat them
+        let mut sk_value: Vec<String> = Vec::new();
+        for (_name, val) in sk_values {
+            let Some(val_string) = val.as_str() else {
+                continue;
+            };
+            sk_value.push(String::from(val_string));
+        }
+        let mut sk_value = sk_value.join("#");
+        sk_value.push('#');
+        ret.insert(String::from("__sk"), AttributeValue::S(sk_value));
+    } else if sk_values.len() == 1 {
+        let (name, val) = *sk_values.first().unwrap();
+        ret.insert(name.clone(), ddb_val(val));
     }
 
     ret
@@ -267,12 +293,12 @@ fn ddb_to_val(ty: &stmt::Type, val: &AttributeValue) -> stmt::Value {
     }
 }
 
-fn ddb_key_schema(partition: &Column, range: Option<&Column>) -> Vec<KeySchemaElement> {
+fn ddb_key_schema(partition: &String, range: Option<&String>) -> Vec<KeySchemaElement> {
     let mut ks = vec![];
 
     ks.push(
         KeySchemaElement::builder()
-            .attribute_name(&partition.name)
+            .attribute_name(partition.clone())
             .key_type(KeyType::Hash)
             .build()
             .unwrap(),
@@ -281,7 +307,7 @@ fn ddb_key_schema(partition: &Column, range: Option<&Column>) -> Vec<KeySchemaEl
     if let Some(range) = range {
         ks.push(
             KeySchemaElement::builder()
-                .attribute_name(&range.name)
+                .attribute_name(range.clone())
                 .key_type(KeyType::Range)
                 .build()
                 .unwrap(),
@@ -294,18 +320,124 @@ fn ddb_key_schema(partition: &Column, range: Option<&Column>) -> Vec<KeySchemaEl
 fn item_to_record<'a, 'stmt>(
     item: &HashMap<String, AttributeValue>,
     columns: impl Iterator<Item = &'a Column>,
+    sk_cols: &Vec<ColumnId>,
 ) -> Result<stmt::ValueRecord> {
+    let mut sk_vals: HashMap<ColumnId, stmt::Value> = HashMap::new();
+    if let Some(sk_val) = item.get("__sk") {
+        let mut parts: Vec<&str> = sk_val.as_s().unwrap().split('#').collect();
+        // we write a trailing delimeter so that begins with will work with both full and partial values
+        parts.pop();
+        assert!(parts.len() <= sk_cols.len(), "too many sort key values");
+        for (index, part) in parts.iter().enumerate() {
+            sk_vals.insert(sk_cols[index].clone(), stmt::Value::String(String::from(*part)));
+        }
+    }
     Ok(stmt::ValueRecord::from_vec(
         columns
             .map(|column| {
                 if let Some(value) = item.get(&column.name) {
                     ddb_to_val(&column.ty, value)
+                } else if let Some(value) = sk_vals.get(&column.id) {
+                    value.clone()
                 } else {
                     stmt::Value::Null
                 }
             })
             .collect(),
     ))
+}
+
+fn sort_key_columns(table: &Table) -> Vec<ColumnId> {
+    table.indices[table.primary_key.index.index].columns.iter()
+        .filter(|c| matches!(c.scope, IndexScope::Local))
+        .map(|c| table.column(c.column).id.clone())
+        .collect()
+}
+
+struct BuildKeyExpression<'a, 'b> {
+    cx: &'a ExprContext<'b, Schema>,
+    attrs: &'a mut ExprAttrs,
+    expr: &'a stmt::Expr,
+    pk_column: &'a Column,
+    sk_columns: &'a Vec<ColumnId>,
+    concat_sk: bool,
+
+    sk_components: HashMap<ColumnId, stmt::Expr>,
+    pk_component: Option<stmt::Expr>,
+}
+
+impl <'a, 'b> BuildKeyExpression<'a, 'b> {
+    fn build(&mut self) -> String {
+        if !self.concat_sk {
+            return ddb_expression(self.cx, self.attrs, true, self.expr);
+        }
+
+        // collect the subexpressions that test the sort keys and partition keys
+        self.visit_expr(self.expr);
+
+        let mut key_expr = String::new();
+        // translate the PK subexpression unchanged
+        let pk_expr = self.pk_component.as_ref().expect("key expression needs a hash key condition");
+        key_expr.push_str(&ddb_expression(self.cx, self.attrs, true, &pk_expr));
+
+        // add the SK subexpressions as a begins_with
+        let mut missing_col = false;
+        let mut sk_prefix = String::new();
+        for sk_col in self.sk_columns {
+            let Some(sk_expr) = self.sk_components.get(sk_col) else {
+                missing_col = true;
+                continue;
+            };
+
+            assert!(!missing_col, "gap in range key component conditions");
+
+            match sk_expr {
+                stmt::Expr::IsNull(_) => {
+                    // skip adding, this column is not relevant to the model
+                },
+                stmt::Expr::BinaryOp(op) if matches!(op.op, stmt::BinaryOp::Eq) => {
+                    let stmt::Expr::Value(val) = op.rhs.as_ref() else {
+                        todo!("op={op:#?}");
+                    };
+                    sk_prefix.push_str(val.expect_string());
+                    sk_prefix.push('#');
+                },
+                _ => todo!("sk_expr={sk_expr:#?}")
+            }
+        }
+        let sk_prefix = self.attrs.literal(sk_prefix);
+        
+        self.attrs.attr_names.insert(String::from("#sk_col"), String::from("__sk"));
+        format!("{key_expr} AND begins_with(#sk_col, {sk_prefix})")
+    }
+}
+
+impl <'a, 'b> Visit for BuildKeyExpression<'a, 'b> {
+
+    fn visit_expr(&mut self, i: &Expr) {
+        match i {
+            stmt::Expr::And(and) => self.visit_expr_and(and),
+            stmt::Expr::BinaryOp(binop) => self.visit_expr_binary_op(binop),
+            stmt::Expr::Value(val) => self.visit_value(val),
+            stmt::Expr::Reference(refer) => self.visit_expr_reference(refer),
+            stmt::Expr::IsNull(isnull) => self.visit_expr_is_null(isnull),
+            _ => todo!("i={i:#?}")
+        }
+    }
+
+    fn visit_expr_binary_op(&mut self, i: &stmt::ExprBinaryOp) {
+        let stmt::Expr::Reference(refer) = i.lhs.as_ref() else {
+            todo!("op={i:#?}");
+        };
+        assert!(matches!(i.op, stmt::BinaryOp::Eq), "unsupported condition {i:#?}");
+        let column = self.cx.resolve_expr_reference(refer).expect_column();
+        if self.pk_column.id == column.id {
+            self.pk_component = Some(i.clone().into());
+        } else {
+            self.sk_components.insert(column.id.clone(), i.clone().into());
+        }
+    }
+
 }
 
 fn ddb_expression(
@@ -354,7 +486,7 @@ fn ddb_expression(
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct ExprAttrs {
     columns: HashMap<ColumnId, String>,
     attr_names: HashMap<String, String>,
@@ -373,6 +505,10 @@ impl ExprAttrs {
             }
             Entry::Occupied(e) => e.into_mut(),
         }
+    }
+
+    fn literal<T: Into<String>>(&mut self, val: T) -> String {
+        self.ddb_value(AttributeValue::S(val.into()))
     }
 
     fn value(&mut self, val: &stmt::Value) -> String {

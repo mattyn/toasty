@@ -517,6 +517,8 @@ impl visit_mut::VisitMut for LowerStatement<'_, '_> {
             lower.constantize_update_returning(returning, &stmt.assignments);
         }
 
+        lower.apply_lowering_filter_constraint(&mut stmt.filter);
+
         self.visit_update_target_mut(&mut stmt.target);
     }
 
@@ -681,7 +683,10 @@ impl<'a, 'b> LowerStatement<'a, 'b> {
 
                     format!("{a}{b}")
                 }
-                stmt::Expr::Value(_) => todo!(),
+                stmt::Expr::Value(_) => {
+                    // todo!()
+                    continue
+                },
                 _ => continue,
             };
 
@@ -697,6 +702,11 @@ impl<'a, 'b> LowerStatement<'a, 'b> {
                 self.expr_cx.expr_ref_column(column),
                 pattern,
             ));
+        }
+        
+        if let Some(model_column) = self.mapping_unwrap().item_collection.model_column.clone() {
+            // we need to additionaly filter by model name to avoid matching other models in this table
+            operands.push(stmt::Expr::eq(self.expr_cx.expr_ref_column(model_column), stmt::Value::from(model.name.camel_case())));
         }
 
         if operands.is_empty() {

@@ -21,6 +21,9 @@ pub struct Model {
 
     /// If the schema specifies a table to map the model to, this is set.
     pub table_name: Option<String>,
+
+    /// If the model should be part of an item collection of another model, this is set.
+    pub item_collection: Option<ModelId>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]

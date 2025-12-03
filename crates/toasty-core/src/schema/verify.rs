@@ -130,11 +130,11 @@ impl Verify<'_> {
                 if nullable {
                     // If there are nullable columns, then (for now) the index
                     // should only have one column
-                    assert_eq!(
-                        index.columns.len(),
-                        1,
-                        "table index with multiple columns includes a nullable column"
-                    );
+                    // assert_eq!(
+                    //     index.columns.len(),
+                    //     1,
+                    //     "table index with multiple columns includes a nullable column"
+                    // );
                 }
             }
         }

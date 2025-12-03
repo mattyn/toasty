@@ -1,6 +1,7 @@
 use super::{Field, FieldId, FieldTy, Model, ModelId};
 
 use crate::Result;
+use anyhow::bail;
 use indexmap::IndexMap;
 
 #[derive(Debug, Default)]
@@ -58,6 +59,8 @@ impl Builder {
         // All models have been discovered and initialized at some level, now do
         // the relation linking.
         self.link_relations()?;
+
+        self.link_item_collections()?;
 
         Ok(())
     }
@@ -196,5 +199,82 @@ impl Builder {
             src,
             self.models.get(&target)
         );
+    }
+
+    fn link_item_collections(&self) -> crate::Result<()> {
+        for (_, model) in &self.models {
+            if model.item_collection.is_none() {
+                continue;
+            }
+
+            self.link_item_collections_one(model)?;
+        }
+
+        Ok(())
+    }
+
+    fn link_item_collections_one(&self, model: &Model) -> crate::Result<()> {
+        if model.primary_key.fields.len() < 2 {
+            bail!(
+                "model {} should have a compound primary key when part of an item collection",
+                model.name.camel_case()
+            );
+        }
+
+        let fields = &model.primary_key.fields;
+        let mut curr_field = 0;
+        let mut primitive_found = false;
+        while curr_field < fields.len() {
+            let mut field = &fields[curr_field];
+            match &model.field(field).ty {
+                FieldTy::BelongsTo(rel) => {
+                    let mut matched_rel = true;
+                    for fk_field in &rel.foreign_key.fields {
+                        if &fk_field.source != field {
+                            matched_rel = false;
+                            break;
+                        }
+
+                        // source field should be a primary key field
+                        if !model.field(fk_field.source).primary_key {
+                            bail!(
+                                "model {} primary key should contain belongs to source attributes of item collection model, but did not contain {}",
+                                model.name.camel_case(),
+                                model.field(field).name().app_name
+                            );
+                        }
+
+                        if primitive_found {
+                            bail!("model {} must have all belongs to source keys before any primitive key fields", model.name.camel_case());
+                        }
+
+                        curr_field += 1;
+                        if curr_field >= fields.len() {
+                            bail!(
+                                "model {} primary key only contains belongs to source fields",
+                                model.name.camel_case()
+                            );
+                        }
+                        field = &fields[curr_field];
+                    }
+                    if !matched_rel {
+                        bail!(
+                            "model {} field {} does not match a belongs to source field",
+                            model.name.camel_case(),
+                            model.field(field).name().app_name
+                        );
+                    }
+                }
+                FieldTy::Primitive(_) => {
+                    primitive_found = true;
+                    curr_field += 1;
+                }
+                _ => {
+                    bail!("model {} should have only primitive or belongs to source fields as primary key", model.name.camel_case());
+                }
+            }
+        }
+
+        Ok(())
     }
 }

@@ -1,3 +1,5 @@
+use crate::sort_key_columns;
+
 use super::{ddb_expression, item_to_record, operation, stmt, DynamoDb, ExprAttrs, Result, Schema};
 use std::sync::Arc;
 use toasty_core::{driver::Response, stmt::ExprContext};
@@ -11,6 +13,7 @@ impl DynamoDb {
         let table = schema.table(op.table);
         let index = schema.index(op.index);
         let cx = ExprContext::new_with_target(&**schema, table);
+        let sk_cols = sort_key_columns(table);
 
         let mut expr_attrs = ExprAttrs::default();
         let key_expression = ddb_expression(&cx, &mut expr_attrs, false, &op.filter);
@@ -41,7 +44,7 @@ impl DynamoDb {
         Ok(Response::value_stream(stmt::ValueStream::from_iter(
             res.items.into_iter().flatten().map(move |item| {
                 let table = schema.table(op.table);
-                item_to_record(&item, table.primary_key_columns())
+                item_to_record(&item, table.primary_key_columns(), &sk_cols)
             }),
         )))
     }

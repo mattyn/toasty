@@ -36,3 +36,6 @@ pub(crate) use pk::PrimaryKey;
 
 mod column;
 pub(crate) use column::Column;
+
+mod item_collection;
+pub(crate) use item_collection::ItemCollection;
